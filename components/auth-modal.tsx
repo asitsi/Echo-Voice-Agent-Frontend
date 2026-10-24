@@ -3,33 +3,12 @@
 import { FormEvent, useEffect, useState } from "react";
 import { GoogleLogin, GoogleOAuthProvider } from "@react-oauth/google";
 import { ArrowRight, Eye, EyeOff, LoaderCircle, LockKeyhole, Mail, ShieldCheck, UserRound, X } from "lucide-react";
+import { login, loginWithGoogle, signup, verifyOtp } from "@/services/echo-api";
+import type { AuthResponse } from "@/types/api";
+import type { AuthModalProps } from "@/types/ui";
 import { BrandMark } from "./brand-mark";
 
-const API_URL = (
-  process.env.NEXT_PUBLIC_API_URL ??
-  "https://nursery-tell-julie-transcription.trycloudflare.com/api"
-).replace(/\/$/, "");
-
 type AuthMode = "login" | "signup" | "otp";
-
-export interface AuthUser {
-  name: string;
-  email: string;
-}
-
-interface AuthResponse {
-  token?: string;
-  accessToken?: string;
-  message?: string;
-  error?: string;
-  user?: { name?: string; email?: string };
-}
-
-interface AuthModalProps {
-  open: boolean;
-  onClose: () => void;
-  onAuthenticated: (token: string, user: AuthUser) => void;
-}
 
 export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
   const [mode, setMode] = useState<AuthMode>("login");
@@ -62,17 +41,6 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
     });
   };
 
-  const request = async (path: string, payload: Record<string, string>) => {
-    const response = await fetch(`${API_URL}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json().catch(() => ({ error: "The API returned an invalid response." })) as AuthResponse;
-    if (!response.ok) throw new Error(result.error ?? result.message ?? `Authentication failed with status ${response.status}`);
-    return result;
-  };
-
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError("");
@@ -80,14 +48,14 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
     setLoading(true);
     try {
       if (mode === "signup") {
-        const result = await request("/auth/signup", { name: name.trim(), email: email.trim(), password });
+        const result = await signup({ name: name.trim(), email: email.trim(), password });
         setMode("otp");
         setNotice(result.message ?? "We sent a 6-digit verification code to your email.");
       } else if (mode === "otp") {
-        const result = await request("/auth/verify-otp", { email: email.trim(), otp: otp.trim() });
+        const result = await verifyOtp({ email: email.trim(), otp: otp.trim() });
         finishAuth(result, email.trim(), name.trim());
       } else {
-        const result = await request("/auth/login", { email: email.trim(), password });
+        const result = await login({ email: email.trim(), password });
         finishAuth(result, email.trim());
       }
     } catch (authError) {
@@ -102,7 +70,7 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
     setLoading(true);
     setError("");
     try {
-      const result = await request("/auth/google", { idToken });
+      const result = await loginWithGoogle(idToken);
       finishAuth(result, result.user?.email ?? "google-user@echo.ai", result.user?.name);
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : "Google authentication failed.");
