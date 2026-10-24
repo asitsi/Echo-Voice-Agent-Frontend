@@ -1,79 +1,45 @@
-# 🎙️ Echo Voice Agent — Frontend
+# 🎙️ Echo Voice Agent - Frontend (Next.js)
 
-A responsive Next.js interface for the Echo Voice Agent meeting-intelligence platform. Users can authenticate, upload a recording, follow transcription progress, review the returned transcript or summary, and ask questions grounded in the meeting.
+This is the frontend interface for the **Echo Voice Agent** (AI Meeting Intelligence Engine). It provides a secure, modern UI for users to authenticate, upload meeting media or documents, view processed content, and interact with an AI assistant using both text and voice.
 
-This repository contains **frontend code only**. The browser communicates directly with the separately deployed Node.js/Express API—there are no Next.js API routes or backend services in this project.
+## ✨ Features
 
-## Features
+- **Secure Authentication:** 
+  - Email/Password Signup with OTP (One-Time Password) email verification.
+  - Google OAuth 2.0 integration for one-click login.
+  - JWT (JSON Web Token) based session management.
+- **Protected Routes:** Users must be authenticated to upload files or chat with meetings.
+- **File Upload:** Supports `audio/*`, `video/*`, `.pdf`, `.txt`, `.md`, and `.csv` files up to 500 MB.
+- **Real-time Status Polling:** Automatically polls the backend to show transcription progress.
+- **RAG Chat Interface:** A streaming chat UI with Markdown-formatted answers grounded in the meeting transcript.
+- **Voice-to-Voice (TTS):** Utilizes the browser's native Web Speech API to read the AI's answers out loud.
+- **Modern UI:** Built with Tailwind CSS for a responsive, dark-mode-first experience.
 
-- Email/password registration with six-digit OTP verification
-- Email/password login and Google OAuth
-- JWT-protected uploads, meeting requests, and chat requests
-- Drag-and-drop audio/video upload
-- Automatic meeting-status polling while transcription is processing
-- Transcript and optional AI-summary views populated from real API data
-- Transcript search and copy controls
-- RAG chat scoped to the selected meeting
-- Browser speech recognition for voice questions
-- Browser text-to-speech for AI answers
-- Recent-meetings menu for returning to a completed upload
-- Responsive desktop and mobile interface
+## 💻 Tech Stack
 
-## Tech stack
+- **Framework:** Next.js (App Router)
+- **Language:** TypeScript
+- **Styling:** Tailwind CSS
+- **Auth Integration:** `@react-oauth/google` (for Google Login) & Fetch API
+- **Text-to-Speech:** Web Speech API (Browser Native)
 
-- Next.js 16 with the App Router
-- React 19
-- TypeScript
-- Tailwind CSS 4
-- `@react-oauth/google`
-- Lucide React
-- Browser Fetch, Web Speech, and Speech Synthesis APIs
+## 🔗 Backend Requirement
 
-## How the frontend connects
+This is a frontend-only Next.js application. It calls the separately deployed `echo-api` service directly from the browser and does not create any Next.js API routes.
 
-```text
-Browser (Next.js frontend)
-        │
-        │ HTTPS + JWT Authorization header
-        ▼
-Node.js / Express API
-        │
-        ├── authentication
-        ├── upload and transcription queue
-        ├── meeting status and transcript
-        └── meeting RAG chat
-```
+## 🚀 Getting Started
 
-The API base URL is read from `NEXT_PUBLIC_API_URL`. It must include the `/api` suffix, for example:
-
-```env
-NEXT_PUBLIC_API_URL=https://your-api-domain.example.com/api
-```
-
-Because requests are sent directly from the browser, the Express backend must allow the frontend origin through CORS, such as `http://localhost:3000` during development and the production frontend domain after deployment.
-
-## Getting started
-
-### 1. Install dependencies
+### 1. Install Dependencies
 
 ```bash
 pnpm install
 ```
 
-### 2. Create `.env.local`
+### 2. Configure Environment
 
-Create a `.env.local` file in the project root:
+The Google client ID is optional when only email/password authentication is needed.
 
-```env
-NEXT_PUBLIC_API_URL=https://your-api-domain.example.com/api
-NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
-```
-
-`NEXT_PUBLIC_GOOGLE_CLIENT_ID` is only required for Google sign-in. Email/password authentication can work without it.
-
-> Variables prefixed with `NEXT_PUBLIC_` are included in the browser bundle. Never put private secrets, Google client secrets, or backend JWT secrets in this file.
-
-### 3. Start development
+### 3. Start Development
 
 ```bash
 pnpm run dev
@@ -81,154 +47,41 @@ pnpm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-Restart the development server after changing `.env.local`.
+## 🔐 Authentication API
 
-## Authentication flow
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/auth/signup` | Register and send an OTP |
+| `POST` | `/api/auth/verify-otp` | Verify email and receive a JWT |
+| `POST` | `/api/auth/login` | Sign in and receive a JWT |
+| `POST` | `/api/auth/google` | Exchange a Google ID token for a JWT |
 
-### Email registration
-
-1. The frontend sends `name`, `email`, and `password` to `POST /api/auth/signup`.
-2. The user enters the six-digit OTP.
-3. The frontend sends `email` and `otp` to `POST /api/auth/verify-otp`.
-4. The returned JWT is saved in `localStorage`.
-
-### Email login
-
-The frontend sends `email` and `password` to `POST /api/auth/login`, then saves the returned JWT.
-
-### Google login
-
-Google Identity Services returns an ID token to the frontend. The frontend sends it as `{ "idToken": "..." }` to `POST /api/auth/google`. The backend verifies it and returns the application JWT.
-
-For local Google login, configure the OAuth client as a **Web application** and add this Authorized JavaScript origin in Google Cloud Console:
-
-```text
-http://localhost:3000
-```
-
-Also add the exact production frontend origin when deploying. Do not add `/api`, a route, or a trailing path to an Authorized JavaScript origin.
-
-## API endpoints
-
-All paths below are relative to `NEXT_PUBLIC_API_URL`.
-
-| Method | Endpoint | Authentication | Purpose |
-| --- | --- | --- | --- |
-| `POST` | `/auth/signup` | Public | Create an account and send an OTP |
-| `POST` | `/auth/verify-otp` | Public | Verify the OTP and receive a JWT |
-| `POST` | `/auth/login` | Public | Sign in and receive a JWT |
-| `POST` | `/auth/google` | Public | Exchange a Google ID token for a JWT |
-| `POST` | `/upload` | Bearer JWT | Upload a recording and start processing |
-| `GET` | `/meeting/:id` | Bearer JWT | Read status, transcript, and summary |
-| `POST` | `/meeting/:id/chat` | Bearer JWT | Ask a question about the meeting |
-
-Protected requests include:
+The JWT is stored in `localStorage` and attached to protected requests as:
 
 ```http
-Authorization: Bearer <JWT>
+Authorization: Bearer <token>
 ```
 
-### Upload request
+Protected requests include upload, meeting status polling, and meeting chat.
 
-The upload request uses `multipart/form-data` with one field:
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `audio` | File | Yes | MP3, WAV, M4A, MP4, or another backend-supported recording |
-
-The browser sets the multipart boundary automatically, so the frontend intentionally does not set a manual `Content-Type` header for uploads.
-
-Expected response:
+Meeting chat requests send the latest 20 real conversation messages along with the new question:
 
 ```json
 {
-  "message": "Processing started.",
-  "meetingId": "0ea9283b-5948-4d28-b3e1-4502c997af4e"
+  "question": "What should happen next?",
+  "history": [
+    { "role": "user", "text": "What was the main decision?" },
+    { "role": "ai", "text": "The team decided to launch the beta." }
+  ]
 }
 ```
 
-After upload, the frontend polls `GET /meeting/:id` until the status is `completed`, `complete`, `processed`, or `ready`. Failed/error statuses stop polling and display an error.
+The chat endpoint returns a plain-text event stream. The frontend requests `text/event-stream`, reads it through `response.body.getReader()`, and updates the AI message as chunks arrive. Content inside `<think>...</think>` is replaced with a `Thinking...` state and is excluded from both the visible answer and text-to-speech. Answers remain silent until the user clicks the speaker icon on a completed AI message. The welcome message and failed-request notices are UI-only and are not included in `history`.
 
-### Chat request
-
-```json
-{
-  "question": "What were the key decisions?"
-}
-```
-
-Expected response:
-
-```json
-{
-  "answer": "The team decided to..."
-}
-```
-
-## Returning to a previous meeting
-
-After a meeting finishes processing, the frontend saves only its ID, title, and creation date in browser storage for the signed-in user.
-
-1. Click **New meeting** to clear the current workspace and upload another recording.
-2. Click **Meetings** in the header.
-3. Select a recent meeting.
-4. The frontend securely refetches it from `GET /meeting/:id` using the current JWT.
-
-Transcript and summary content are not stored in the local meeting-history index.
-
-The current backend API does not provide a meeting-list endpoint, so this history is limited to completed meetings uploaded from the same browser. To synchronize history across devices, add a protected `GET /api/meetings` endpoint and use its response instead of the local index.
-
-## Available commands
-
-```bash
-pnpm run dev        # Start the development server
-pnpm run typecheck  # Run TypeScript checks
-pnpm run build      # Create a production build with webpack
-pnpm start          # Start the production server
-```
-
-Before deployment, run:
+## Production
 
 ```bash
 pnpm run typecheck
 pnpm run build
+pnpm start
 ```
-
-## Project structure
-
-```text
-app/
-├── globals.css               # Global styles and responsive layout
-├── layout.tsx                # Root application layout
-└── page.tsx                  # Auth state, upload/polling, and meeting history
-components/
-├── auth-modal.tsx            # Email, OTP, and Google authentication
-├── brand-mark.tsx            # Echo brand mark
-├── meeting-workspace.tsx     # Transcript, summary, chat, and speech controls
-└── upload-card.tsx           # Locked, ready, uploading, and error states
-hooks/
-└── use-speech.ts             # Browser text-to-speech helper
-types/
-└── meeting.ts                # Shared meeting and chat types
-```
-
-## Troubleshooting
-
-### Upload or authentication is blocked by CORS
-
-Confirm that the Express API allows the exact frontend origin. An HTTP `500` response is a backend failure, even if DevTools also mentions cross-origin behavior; inspect the response body and backend logs.
-
-### Google reports `Error 401: invalid_client` or `no registered origin`
-
-- Use a Google OAuth client with type **Web application**.
-- Add `http://localhost:3000` to Authorized JavaScript origins.
-- Make sure `.env.local` contains the same client ID configured on the backend.
-- Restart `pnpm run dev` after changing the environment variable.
-
-### A previous meeting is missing
-
-Only meetings completed in the current browser after the history feature was enabled are available locally. Cross-device or complete account history requires a backend meeting-list endpoint.
-
-### Voice controls do not work
-
-Speech recognition and speech synthesis availability varies by browser. Use a current Chromium-based browser for the broadest support and allow microphone access when prompted.

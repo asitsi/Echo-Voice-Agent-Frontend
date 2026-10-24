@@ -8,10 +8,7 @@ import { AuthModal, type AuthUser } from "@/components/auth-modal";
 import { BrandMark } from "@/components/brand-mark";
 import type { MeetingRecord } from "@/types/meeting";
 
-const API_URL = (
-  process.env.NEXT_PUBLIC_API_URL ??
-  "https://nursery-tell-julie-transcription.trycloudflare.com/api"
-).replace(/\/$/, "");
+const API_URL = (process.env.NEXT_PUBLIC_API_URL)?.replace(/\/$/, "");
 
 interface UploadResponse {
   message: string;

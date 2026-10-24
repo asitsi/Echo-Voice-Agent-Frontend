@@ -5,6 +5,7 @@ export interface ChatMessage {
   role: "assistant" | "user";
   content: string;
   sources?: string[];
+  includeInHistory?: boolean;
 }
 
 export interface MeetingRecord {

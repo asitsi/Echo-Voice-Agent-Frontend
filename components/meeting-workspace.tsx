@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import {
   ArrowUp,
   Bot,
@@ -23,13 +24,6 @@ const API_URL = (
   process.env.NEXT_PUBLIC_API_URL ??
   "https://nursery-tell-julie-transcription.trycloudflare.com/api"
 ).replace(/\/$/, "");
-
-interface ChatResponse {
-  answer: string;
-  sources?: string[];
-  message?: string;
-  error?: string;
-}
 
 interface TranscriptLine {
   id: string;
@@ -130,6 +124,33 @@ function formatMeetingDate(value?: string) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
 }
 
+function removeThinkingContent(value: string) {
+  return value
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/gi, "")
+    .trim();
+}
+
+function isInsideThinkingBlock(value: string) {
+  const lastOpenTag = value.toLowerCase().lastIndexOf("<think>");
+  const lastCloseTag = value.toLowerCase().lastIndexOf("</think>");
+  return lastOpenTag > lastCloseTag;
+}
+
+function markdownToSpeech(value: string) {
+  return value
+    .replace(/```[\w-]*\n?/g, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/(\*|_)(.*?)\1/g, "$2")
+    .replace(/~~(.*?)~~/g, "$1")
+    .replace(/^\s*(?:#{1,6}|>|[-+*]|\d+\.)\s+/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export function MeetingWorkspace({ meeting, token, onRequireAuth, onToast }: { meeting: MeetingRecord; token: string | null; onRequireAuth: () => void; onToast: (message: string) => void }) {
   const transcript = useMemo(() => normalizeTranscript(meeting.transcript), [meeting.transcript]);
   const summary = useMemo(() => normalizeSummary(meeting.summary), [meeting.summary]);
@@ -139,16 +160,18 @@ export function MeetingWorkspace({ meeting, token, onRequireAuth, onToast }: { m
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { speak, stop, speaking } = useSpeech();
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: "welcome", role: "assistant", content: "This meeting is ready. Ask me anything grounded in its transcript." },
+    { id: "welcome", role: "assistant", content: "This meeting is ready. Ask me anything grounded in its transcript.", includeInHistory: false },
   ]);
 
   useEffect(() => {
     setTab(summary ? "summary" : "transcript");
     setQuery("");
-    setMessages([{ id: `welcome-${meeting.id}`, role: "assistant", content: "This meeting is ready. Ask me anything grounded in its transcript." }]);
+    setStreamingMessageId(null);
+    setMessages([{ id: `welcome-${meeting.id}`, role: "assistant", content: "This meeting is ready. Ask me anything grounded in its transcript.", includeInHistory: false }]);
   }, [meeting.id, summary]);
 
   const filtered = useMemo(() => transcript.filter((line) => `${line.speaker} ${line.text}`.toLowerCase().includes(query.toLowerCase())), [query, transcript]);
@@ -165,23 +188,68 @@ export function MeetingWorkspace({ meeting, token, onRequireAuth, onToast }: { m
       return;
     }
 
+    const history = messages
+      .filter((message) => message.includeInHistory)
+      .slice(-20)
+      .map(({ role, content }) => ({
+        role: role === "assistant" ? "ai" : "user",
+        text: content,
+      }));
+
+    const userMessageId = crypto.randomUUID();
+    const assistantMessageId = crypto.randomUUID();
     setInput("");
-    setMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", content: question }]);
+    setStreamingMessageId(assistantMessageId);
+    setMessages((current) => [
+      ...current,
+      { id: userMessageId, role: "user", content: question, includeInHistory: true },
+      { id: assistantMessageId, role: "assistant", content: "", includeInHistory: true },
+    ]);
     setLoading(true);
     try {
       const response = await fetch(`${API_URL}/meeting/${encodeURIComponent(meeting.id)}/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ question }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "Accept": "text/event-stream", "Cache-Control": "no-cache" },
+        body: JSON.stringify({ question, history }),
       });
-      const result = await response.json() as ChatResponse;
-      if (response.status === 401) onRequireAuth();
-      if (!response.ok) throw new Error(result.error || result.message || `Chat request failed with status ${response.status}`);
-      setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", content: result.answer, sources: result.sources }]);
+      if (!response.ok) {
+        if (response.status === 401) onRequireAuth();
+        const errorText = await response.text().catch(() => "");
+        throw new Error(errorText || `Chat request failed with status ${response.status}`);
+      }
+      if (!response.body) throw new Error("The chat response did not include a readable stream.");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let answer = "";
+
+      const updateStreamedAnswer = (text: string) => {
+        setMessages((current) => current.map((message) => (
+          message.id === assistantMessageId ? { ...message, content: text } : message
+        )));
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        answer += decoder.decode(value, { stream: true });
+        const displayText = removeThinkingContent(answer);
+        updateStreamedAnswer(isInsideThinkingBlock(answer) ? "Thinking..." : displayText || "Thinking...");
+      }
+
+      answer += decoder.decode();
+      const finalCleanAnswer = removeThinkingContent(answer);
+      if (!finalCleanAnswer) throw new Error("The AI returned an empty response.");
+      updateStreamedAnswer(finalCleanAnswer);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown API error";
-      setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", content: `I couldn’t complete that request: ${message}` }]);
+      setMessages((current) => current.map((chatMessage) => (
+        chatMessage.id === assistantMessageId
+          ? { ...chatMessage, content: `I couldn’t complete that request: ${message}`, includeInHistory: false }
+          : chatMessage
+      )));
     } finally {
+      setStreamingMessageId(null);
       setLoading(false);
     }
   };
@@ -268,19 +336,18 @@ export function MeetingWorkspace({ meeting, token, onRequireAuth, onToast }: { m
         <aside className="chat-panel">
           <div className="chat-header">
             <div><span className="echo-avatar"><Bot size={17} /></span><span><strong>Ask Echo</strong><small><i /> Connected to this meeting</small></span></div>
-            <button onClick={() => setMessages([{ id: crypto.randomUUID(), role: "assistant", content: "Chat cleared. What would you like to know?" }])} aria-label="Clear chat" title="Clear chat"><X size={16} /></button>
+            <button onClick={() => { stop(); setStreamingMessageId(null); setMessages([{ id: crypto.randomUUID(), role: "assistant", content: "Chat cleared. What would you like to know?", includeInHistory: false }]); }} disabled={loading} aria-label="Clear chat" title="Clear chat"><X size={16} /></button>
           </div>
           <div className="chat-messages">
             {messages.map((message) => (
               <div key={message.id} className={`message ${message.role}`}>
                 {message.role === "assistant" && <span className="message-mark"><Sparkles size={12} /></span>}
                 <div>
-                  <p>{message.content}</p>
-                  {message.sources && <div className="message-actions">{message.sources.slice(0, 2).map((source) => <button key={source} onClick={() => jumpToTranscript(source)}>{source}</button>)}<button onClick={() => speaking ? stop() : speak(message.content)} aria-label={speaking ? "Stop reading" : "Read aloud"}>{speaking ? <Square size={12} fill="currentColor" /> : <Volume2 size={14} />}</button></div>}
+                  {message.content ? message.role === "assistant" ? <div className="message-markdown"><ReactMarkdown>{message.content}</ReactMarkdown></div> : <p>{message.content}</p> : message.id === streamingMessageId ? <div className="thinking"><i /><i /><i /></div> : null}
+                  {message.role === "assistant" && message.content && message.includeInHistory && <div className="message-actions">{message.sources?.slice(0, 2).map((source) => <button key={source} onClick={() => jumpToTranscript(source)}>{source}</button>)}<button onClick={() => speaking ? stop() : speak(markdownToSpeech(message.content))} aria-label={speaking ? "Stop reading" : "Read aloud"}>{speaking ? <Square size={12} fill="currentColor" /> : <Volume2 size={14} />}</button></div>}
                 </div>
               </div>
             ))}
-            {loading && <div className="thinking"><i /><i /><i /></div>}
           </div>
 
           {messages.length === 1 && <div className="suggestions">{starters.map((starter) => <button key={starter} onClick={() => send(undefined, starter)}>{starter}<ArrowUp size={13} /></button>)}</div>}
