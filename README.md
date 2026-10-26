@@ -65,11 +65,11 @@ cp .env.example .env.local
 ```
 
 ```env
-NEXT_BACKEND_API_URL=https://your-backend-domain.example.com/api
+NEXT_PUBLIC_BACKEND_API_URL=https://your-backend-domain.example.com/api
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 ```
 
-`NEXT_BACKEND_API_URL` is required and must include the `/api` suffix. The Google client ID is optional when only email/password authentication is needed. `.env.local` is ignored by Git and must not be committed.
+`NEXT_PUBLIC_BACKEND_API_URL` is required and must include the `/api` suffix. The Google client ID is optional when only email/password authentication is needed. `.env.local` is ignored by Git and must not be committed.
 
 For Vercel, add both values under **Project Settings → Environment Variables**, select the required environments, and redeploy. `NEXT_PUBLIC_*` values are embedded during the frontend build, so changing them requires a new deployment.
 

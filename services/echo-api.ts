@@ -6,10 +6,10 @@ import type {
   UploadResponse,
 } from "@/types/api";
 
-const configuredApiUrl = process.env.NEXT_BACKEND_API_URL;
+const configuredApiUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL;
 
 if (!configuredApiUrl) {
-  throw new Error("NEXT_BACKEND_API_URL is not configured. Add it to .env.local or your deployment environment variables.");
+  throw new Error("NEXT_PUBLIC_BACKEND_API_URL is not configured. Add it to .env.local or your deployment environment variables.");
 }
 
 const API_URL = configuredApiUrl.replace(/\/$/, "");
